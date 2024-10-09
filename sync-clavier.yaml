@@ -1,0 +1,149 @@
+blueprint:
+  name: Synchronisation Clavier - Alarme par Howmation
+  description: "Cette blueprint permet de relier un clavier Zigbee2MQTT à un panneau de contrôle d'alarme. Ainsi, l'état du panneau d'alarme est communiqué au clavier, et inversement, pour une synchronisation complète des deux dispositifs."
+  domain: automation
+  input:
+    mqtt_topic_etat_clavier:
+      name: Topic MQTT d'état du clavier Zigbee2MQTT
+      description: "Le topic MQTT où le clavier publie ses états. Exemple : zigbee2mqtt/Clavier"
+    mqtt_topic_commande_clavier:
+      name: Topic MQTT de commande du clavier Zigbee2MQTT
+      description: "Le topic MQTT pour envoyer des commandes au clavier. C'est généralement le topic d'état avec '/set' ajouté à la fin. Exemple : zigbee2mqtt/Clavier/set"
+    code_pins:
+      name: Codes PIN
+      description: "Liste des codes PIN valides pour contrôler le système d'alarme"
+      default:
+        - "1234"
+      selector:
+        text:
+          multiple: true
+    panneau_alarme:
+      name: Panneau de contrôle d'alarme
+      description: "Un panneau de contrôle d'alarme (Alarmo par exemple)"
+      selector:
+        entity:
+          domain: alarm_control_panel
+
+variables:
+  codes_pins_valides: !input "code_pins"
+
+trigger:
+  - platform: state
+    entity_id: !input "panneau_alarme"
+    id: changement_etat_alarme
+  - platform: mqtt
+    topic: !input "mqtt_topic_etat_clavier"
+    id: commande_clavier
+
+action:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: changement_etat_alarme
+        sequence:
+          - service: mqtt.publish
+            data:
+              topic: !input "mqtt_topic_commande_clavier"
+              payload: >
+                {% set etat = trigger.to_state.state %}
+                {% if etat == 'armed_away' %}
+                {
+                  "arm_mode": {
+                    "mode": "arm_all_zones"
+                  }
+                }
+                {% elif etat == 'armed_home' %}
+                {
+                  "arm_mode": {
+                    "mode": "arm_day_zones"
+                  }
+                }
+                {% elif etat == 'disarmed' %}
+                {
+                  "arm_mode": {
+                    "mode": "disarm"
+                  }
+                }
+                {% elif etat == 'arming' %}
+                  {% if trigger.to_state.attributes.next_state == 'armed_home' %}
+                  {
+                    "arm_mode": {
+                      "mode": "arm_day_zones"
+                    }
+                  }
+                  {% elif trigger.to_state.attributes.next_state == 'armed_away' %}
+                  {
+                    "arm_mode": {
+                      "mode": "exit_delay"
+                    }
+                  }
+                  {% endif %}
+                {% endif %}
+      - conditions:
+          - condition: trigger
+            id: commande_clavier
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ trigger.payload_json.action_transaction is defined and
+                         trigger.payload_json.action_code in codes_pins_valides }}
+                sequence:
+                  - service: mqtt.publish
+                    data:
+                      topic: !input "mqtt_topic_commande_clavier"
+                      payload: >
+                        {
+                          "arm_mode": {
+                            "transaction": "{{ trigger.payload_json.action_transaction }}",
+                            "mode": "{{ trigger.payload_json.action }}"
+                          }
+                        }
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ trigger.payload_json.action == 'arm_all_zones' }}"
+                        sequence:
+                          - service: alarm_control_panel.alarm_arm_away
+                            target:
+                              entity_id: !input "panneau_alarme"
+                            data:
+                              code: "{{ trigger.payload_json.action_code }}"
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ trigger.payload_json.action == 'arm_day_zones' }}"
+                        sequence:
+                          - service: alarm_control_panel.alarm_arm_home
+                            target:
+                              entity_id: !input "panneau_alarme"
+                            data:
+                              code: "{{ trigger.payload_json.action_code }}"
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ trigger.payload_json.action == 'disarm' }}"
+                        sequence:
+                          - service: alarm_control_panel.alarm_disarm
+                            target:
+                              entity_id: !input "panneau_alarme"
+                            data:
+                              code: "{{ trigger.payload_json.action_code }}"
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ trigger.payload_json.action_transaction is defined and
+                         trigger.payload_json.action_code not in codes_pins_valides }}
+                sequence:
+                  - service: mqtt.publish
+                    data:
+                      topic: !input "mqtt_topic_commande_clavier"
+                      payload: >
+                        {
+                          "arm_mode": {
+                            "transaction": "{{ trigger.payload_json.action_transaction }}",
+                            "mode": "invalid_code"
+                          }
+                        }
+
+mode: parallel
+max: 10
