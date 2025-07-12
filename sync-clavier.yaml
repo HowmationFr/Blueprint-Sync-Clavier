@@ -64,6 +64,12 @@ action:
                     "mode": "disarm"
                   }
                 }
+                {% elif etat == 'pending' %}
+                {
+                  "arm_mode": {
+                    "mode": "entry_delay"
+                  }
+                }
                 {% elif etat == 'arming' %}
                   {% if trigger.to_state.attributes.next_state == 'armed_home' %}
                   {
