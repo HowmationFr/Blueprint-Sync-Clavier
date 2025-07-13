@@ -58,10 +58,22 @@ action:
                     "mode": "arm_day_zones"
                   }
                 }
+                {% elif etat == 'armed_night' %}
+                {
+                  "arm_mode": {
+                    "mode": "arm_night_zones"
+                  }
+                }
                 {% elif etat == 'disarmed' %}
                 {
                   "arm_mode": {
                     "mode": "disarm"
+                  }
+                }
+                {% elif etat == 'pending' %}
+                {
+                  "arm_mode": {
+                    "mode": "entry_delay"
                   }
                 }
                 {% elif etat == 'arming' %}
@@ -115,6 +127,15 @@ action:
                             value_template: "{{ trigger.payload_json.action == 'arm_day_zones' }}"
                         sequence:
                           - service: alarm_control_panel.alarm_arm_home
+                            target:
+                              entity_id: !input "panneau_alarme"
+                            data:
+                              code: "{{ trigger.payload_json.action_code }}"
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ trigger.payload_json.action == 'arm_night_zones' }}"
+                        sequence:
+                          - service: alarm_control_panel.alarm_arm_night
                             target:
                               entity_id: !input "panneau_alarme"
                             data:
